@@ -5,6 +5,14 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+def normalize_tandoor_api_token(raw: str) -> str:
+    """Strip whitespace and accidental duplicate ``Bearer `` prefix from env/copied values."""
+    t = (raw or "").strip()
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    return t
+
+
 @dataclass(frozen=True)
 class Settings:
     openai_api_key: str
@@ -18,7 +26,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         openai_api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
         tandoor_url = (os.environ.get("TANDOOR_URL") or "").strip().rstrip("/")
-        tandoor_api_token = (os.environ.get("TANDOOR_API_TOKEN") or "").strip()
+        tandoor_api_token = normalize_tandoor_api_token(os.environ.get("TANDOOR_API_TOKEN") or "")
         ingest_api_key = (os.environ.get("INGEST_API_KEY") or "").strip()
         cookie = os.environ.get("YTDLP_COOKIE_FILE")
         ffmpeg_loc = os.environ.get("YTDLP_FFMPEG_LOCATION")

@@ -2,7 +2,21 @@ import os
 
 import pytest
 
-from app.settings import Settings
+from app.settings import Settings, normalize_tandoor_api_token
+
+
+def test_normalize_tandoor_api_token_strips_bearer_prefix():
+    assert normalize_tandoor_api_token("Bearer abc123") == "abc123"
+    assert normalize_tandoor_api_token("  bearer  xyz  ") == "xyz"
+
+
+def test_from_env_normalizes_tandoor_token(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "a")
+    monkeypatch.setenv("TANDOOR_URL", "http://x")
+    monkeypatch.setenv("TANDOOR_API_TOKEN", "Bearer eyJtoken")
+    monkeypatch.setenv("INGEST_API_KEY", "c")
+    s = Settings.from_env()
+    assert s.tandoor_api_token == "eyJtoken"
 
 
 def test_from_env_success(monkeypatch):

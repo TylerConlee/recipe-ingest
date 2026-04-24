@@ -31,6 +31,7 @@ def test_send_recipe_create_only_no_image(tandoor_settings):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST" and request.url.path == "/api/recipe/":
             assert b'"name"' in request.content
+            assert request.headers.get("authorization") == "Bearer secret-token"
             return httpx.Response(201, json={"id": 99, "name": "R", "source_url": "https://src"})
         return httpx.Response(404, json={"detail": "not found"})
 

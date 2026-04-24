@@ -14,9 +14,28 @@ if TYPE_CHECKING:
     from app.settings import Settings
 
 
+class TandoorBearerAuth(httpx.Auth):
+    """
+    Send ``Authorization: Bearer <token>`` on every request, including after redirects.
+
+    Passing credentials via ``auth=`` (instead of only a static ``headers=`` dict) lets httpx
+    re-apply them after redirects. Some reverse proxies also drop ``Authorization`` unless
+    configured to forward it—see the README troubleshooting section.
+    """
+
+    def __init__(self, token: str) -> None:
+        self._token = (token or "").strip()
+
+    def auth_flow(self, request: httpx.Request):
+        request.headers["Authorization"] = f"Bearer {self._token}"
+        yield request
+
+
 def tandoor_json_headers(settings: "Settings") -> dict:
+    """Headers for JSON Tandoor API calls (used by tests and any code that needs a plain dict)."""
+    token = (settings.tandoor_api_token or "").strip()
     return {
-        "Authorization": f"Bearer {settings.tandoor_api_token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
 
@@ -54,13 +73,14 @@ def send_recipe_to_tandoor(
     client_factory: Callable[..., httpx.Client] = httpx.Client,
 ) -> dict:
     body = build_tandoor_recipe_payload(recipe, page_url, platform)
+    tandoor_auth = TandoorBearerAuth(settings.tandoor_api_token)
 
     def do(http: httpx.Client) -> dict:
         print("=== TANDOOR CREATE RECIPE ===")
         create_res = http.post(
             f"{settings.tandoor_url}/api/recipe/",
             json=body,
-            headers=tandoor_json_headers(settings),
+            auth=tandoor_auth,
         )
         if not create_res.is_success:
             print("Tandoor create failed:", create_res.status_code, create_res.text)
@@ -76,7 +96,7 @@ def send_recipe_to_tandoor(
                     print("=== TANDOOR RECIPE IMAGE (multipart) ===", filename, len(file_bytes), "bytes")
                     img_res = http.put(
                         f"{settings.tandoor_url}/api/recipe/{recipe_id}/image/",
-                        headers={"Authorization": f"Bearer {settings.tandoor_api_token}"},
+                        auth=tandoor_auth,
                         files={"image": (filename, BytesIO(file_bytes), mime)},
                     )
                     print("Image PUT status:", img_res.status_code, img_res.text[:500])
