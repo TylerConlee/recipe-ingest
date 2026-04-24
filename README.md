@@ -1,5 +1,8 @@
 # Recipe Ingest
 
+[![CI](https://github.com/TylerConlee/recipe-ingest/actions/workflows/ci.yml/badge.svg)](https://github.com/TylerConlee/recipe-ingest/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/TylerConlee/recipe-ingest/graph/badge.svg)](https://codecov.io/gh/TylerConlee/recipe-ingest)
+
 A small **FastAPI** service that turns cooking content from **TikTok** and **Instagram Reels** into structured recipes in **[Tandoor Recipes](https://docs.tandoor.dev/)**. It downloads media with **yt-dlp**, prepares audio for **OpenAI Whisper**, asks **GPT-4o** to extract a Tandoor-shaped recipe (steps with nested ingredients, times, keywords, and metadata) from the caption plus transcript, then **creates the recipe via the Tandoor REST API** and uploads the video thumbnail as the cover image.
 
 There is **no published container image** today. The intended workflow is to **build the image yourself** (on your media server or in CI) and run it from your own stack, or push to a private registry if you want reuse across hosts.
@@ -154,6 +157,8 @@ pytest tests/ --cov=app --cov-report=term-missing --cov-fail-under=80
 ```
 
 CI (GitHub Actions) runs the same command on **Python 3.12** with placeholder environment variables so imports succeed; external services are not contacted because tests use mocks.
+
+Coverage from the latest workflow run is uploaded to **[Codecov](https://codecov.io/gh/TylerConlee/recipe-ingest)**; the badge above reflects the default branch after you [add this repository to Codecov](https://docs.codecov.com/docs/quick-start) (free for public projects). For **private** repositories, create an upload token in Codecov and add it as the `CODECOV_TOKEN` repository secret so uploads succeed.
 
 ## License
 
