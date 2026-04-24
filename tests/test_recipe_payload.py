@@ -194,6 +194,20 @@ def test_tandoor_ingredient_header():
     assert row is not None
     assert row["is_header"] is True
     assert row["food"]["name"] == "For the sauce"
+    assert row["unit"]["name"] == "each"
+
+
+def test_tandoor_ingredient_blank_unit_becomes_each():
+    row = tandoor_ingredient_payload({"item": "eggs", "amount": 2, "unit": "", "note": ""}, 0)
+    assert row is not None
+    assert row["unit"]["name"] == "each"
+
+
+def test_normalize_gpt_steps_skips_empty_dict_and_none():
+    recipe = {"steps": [None, {}, {"instruction": "Go", "ingredients": []}]}
+    out = normalize_gpt_steps(recipe)
+    assert len(out) == 1
+    assert out[0]["instruction"] == "Go"
 
 
 def test_tandoor_ingredient_skips_empty_item():
@@ -207,6 +221,7 @@ def test_tandoor_ingredient_no_amount_salt():
     )
     assert row["no_amount"] is True
     assert row["amount"] == 0.0
+    assert row["unit"]["name"] == "each"
 
 
 def test_build_tandoor_steps_fills_empty_instruction():

@@ -11,6 +11,9 @@ RECIPE_NAME_MAX = 128
 STEP_NAME_MAX = 128
 ING_NOTE_MAX = 256
 
+# Tandoor's UnitSerializer rejects blank names; use a generic unit for countables / headers.
+TANDOOR_DEFAULT_UNIT_NAME = "each"
+
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) "
     "Gecko/20100101 Firefox/115.0"

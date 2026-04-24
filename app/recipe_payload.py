@@ -11,6 +11,7 @@ from app.constants import (
     RECIPE_DESC_MAX,
     RECIPE_NAME_MAX,
     STEP_NAME_MAX,
+    TANDOOR_DEFAULT_UNIT_NAME,
 )
 
 
@@ -164,6 +165,8 @@ def normalize_gpt_steps(recipe: dict) -> List[dict]:
 
     out: List[dict] = []
     for s in raw_steps:
+        if s is None:
+            continue
         if isinstance(s, str):
             out.append(
                 {
@@ -177,12 +180,17 @@ def normalize_gpt_steps(recipe: dict) -> List[dict]:
             inst = s.get("instruction") or s.get("text") or ""
             if isinstance(inst, dict):
                 inst = inst.get("text") or ""
+            inst_str = str(inst).strip()
+            name = (s.get("name") or "").strip()
+            ingredients = list(s.get("ingredients") or [])
+            if not inst_str and not name and not ingredients:
+                continue
             out.append(
                 {
-                    "name": (s.get("name") or "").strip(),
-                    "instruction": str(inst).strip(),
+                    "name": name,
+                    "instruction": inst_str,
                     "time_minutes": s.get("time_minutes", s.get("time")),
-                    "ingredients": list(s.get("ingredients") or []),
+                    "ingredients": ingredients,
                 }
             )
 
@@ -224,6 +232,13 @@ def normalize_gpt_steps(recipe: dict) -> List[dict]:
     return out
 
 
+def _tandoor_unit_name(raw: Any) -> str:
+    u = (raw or "").strip() if isinstance(raw, str) else str(raw or "").strip()
+    if not u:
+        return TANDOOR_DEFAULT_UNIT_NAME
+    return u[:64]
+
+
 def tandoor_ingredient_payload(ing: dict, order: int) -> Optional[dict]:
     item = (ing.get("item") or ing.get("food") or "").strip()
     is_header = bool(ing.get("is_section_header") or ing.get("is_header"))
@@ -231,7 +246,7 @@ def tandoor_ingredient_payload(ing: dict, order: int) -> Optional[dict]:
         title = item or "Section"
         return {
             "food": {"name": title[:128]},
-            "unit": {"name": ""},
+            "unit": {"name": _tandoor_unit_name(ing.get("unit"))},
             "amount": 0,
             "note": "",
             "order": order,
@@ -243,21 +258,26 @@ def tandoor_ingredient_payload(ing: dict, order: int) -> Optional[dict]:
     if not item:
         return None
 
-    unit = (ing.get("unit") or "").strip()
+    u_raw = ing.get("unit")
+    if isinstance(u_raw, str):
+        raw_unit_display = u_raw.strip()
+    else:
+        raw_unit_display = str(u_raw or "").strip()
+    unit = _tandoor_unit_name(ing.get("unit"))
     note = (ing.get("note") or "").strip()[:ING_NOTE_MAX]
     no_amount = bool(ing.get("no_amount"))
     amount_f = 0.0 if no_amount else parse_amount_to_float(ing.get("amount"))
-    if not no_amount and amount_f <= 0 and not unit:
+    if not no_amount and amount_f <= 0 and not raw_unit_display:
         no_amount = True
 
     amt_str = ""
     if not no_amount and ing.get("amount") is not None and str(ing.get("amount")).strip() != "":
         amt_str = str(ing.get("amount")).strip()
-    orig = format_ingredient_line(amt_str, unit, item, note)[:512]
+    orig = format_ingredient_line(amt_str, raw_unit_display, item, note)[:512]
 
     return {
         "food": {"name": item[:128]},
-        "unit": {"name": (unit or "")[:64]},
+        "unit": {"name": unit},
         "amount": float(amount_f),
         "note": note,
         "order": order,
@@ -385,7 +405,9 @@ Rules:
   "ingredients" arrays if that fits the video better.
 - Every non-header ingredient MUST have a meaningful "item" (food name).
 - Use "is_section_header": true only for section titles; for those set "item" to the section title text,
-  "amount" to 0 or empty, "no_amount": true, "unit": "".
+  "amount" to 0 or empty, "no_amount": true, "unit": "" (empty is OK; the importer maps it to a generic unit).
+- For non-header ingredients, always set "unit" when there is a real measure (cup, g, …). If there is no unit
+  (e.g. "2 eggs"), use "" or "each".
 - Include all distinct cooking steps in order; do not merge unrelated actions.
 - If time is unknown, use nulls — do not invent precise minutes.
 - "source_url" must be the provided SOURCE URL below.
