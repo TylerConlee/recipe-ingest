@@ -9,6 +9,9 @@
 services:
   recipe-ingest:
     build: .
+    # CI publishes to GHCR after tests pass; use instead of local build, e.g.:
+    # image: ghcr.io/tylerconlee/recipe-ingest:latest
+    # pull_policy: always
     image: recipe-ingest:local
     restart: unless-stopped
     ports:

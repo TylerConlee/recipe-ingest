@@ -5,7 +5,15 @@
 
 A small **FastAPI** service that turns cooking content from **TikTok** and **Instagram Reels** into structured recipes in **[Tandoor Recipes](https://docs.tandoor.dev/)**. It downloads media with **yt-dlp**, prepares audio for **OpenAI Whisper**, asks **GPT-4o** to extract a Tandoor-shaped recipe (steps with nested ingredients, times, keywords, and metadata) from the caption plus transcript, then **creates the recipe via the Tandoor REST API** and uploads the video thumbnail as the cover image.
 
-There is **no published container image** today. The intended workflow is to **build the image yourself** (on your media server or in CI) and run it from your own stack, or push to a private registry if you want reuse across hosts.
+Each push to **`main`** or **`master`** (after tests pass) builds and pushes an image to **GitHub Container Registry** (`ghcr.io`), free for public repositories using the workflow’s `GITHUB_TOKEN`.
+
+```text
+ghcr.io/tylerconlee/recipe-ingest:latest
+```
+
+Also tagged with the commit **SHA** (`sha-<short>`). Git tags matching **`v*`** (e.g. `v1.2.0`) add **semver** tags (`1.2.0`, `1.2`). Replace `tylerconlee` with your GitHub username if you fork the repo.
+
+After the first successful run, open the package under **GitHub → your profile (or org) → Packages → recipe-ingest** and set **Package settings → Change package visibility** to **Public** if you want unauthenticated `docker pull`. For private images, authenticate with a PAT that has `read:packages` (or use `GITHUB_TOKEN` in Actions that pull the image).
 
 ## Goals
 
@@ -95,7 +103,16 @@ curl -sS -X POST "http://localhost:8000/ingest/social" \
 
 ## Deployment
 
-### Build and run locally (no registry)
+### Pre-built image (GHCR)
+
+```bash
+docker pull ghcr.io/tylerconlee/recipe-ingest:latest
+docker run --rm -p 8000:8000 --env-file .env ghcr.io/tylerconlee/recipe-ingest:latest
+```
+
+Use a **secrets mechanism** your orchestrator supports (Docker Compose `secrets`, Kubernetes secrets, etc.) instead of committing `.env` to git.
+
+### Build and run locally
 
 From the repository root:
 
@@ -106,18 +123,9 @@ docker run --rm -p 8000:8000 \
   recipe-ingest:local
 ```
 
-Use a **secrets mechanism** your orchestrator supports (Docker Compose `secrets`, Kubernetes secrets, etc.) instead of committing `.env` to git.
-
-### Optional: publish your own image
-
-Because this repo does not ship a pre-built image, pick one of:
-
-- **Build on the host** that runs your stack (simplest for a single media server).
-- **Private registry** (Docker Hub, GitHub Container Registry, etc.): `docker tag` / `docker push` after `docker build` in CI so other machines can `docker pull`.
-
 ### Docker Compose
 
-Use the checked-in **`docker-compose.yml`**. It builds `recipe-ingest:local`, publishes port **`${RECIPE_INGEST_PORT:-8000}`**, and passes required variables from your environment or a project **`.env`** file (Compose reads `.env` for `${…}` substitution automatically).
+Use the checked-in **`docker-compose.yml`**. By default it **builds** `recipe-ingest:local` and publishes **`${RECIPE_INGEST_PORT:-8000}`**. To use the CI image instead of building, set `image:` to `ghcr.io/tylerconlee/recipe-ingest:latest` (see comments in the file) and remove or keep `build:` as you prefer.
 
 ```bash
 docker compose up -d --build
