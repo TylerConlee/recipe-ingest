@@ -1,0 +1,34 @@
+# Recipe ingest + Tandoor: set TANDOOR_URL to a hostname reachable from this container
+# (e.g. http://recipes:8080 on a shared Docker network, or your LAN IP).
+#
+# Compose loads a project `.env` for variable substitution. You can also export vars
+# in your shell before `docker compose up`.
+#
+# Optional cookies: uncomment volumes + YTDLP_COOKIE_FILE, path must exist on the host.
+
+services:
+  recipe-ingest:
+    build: .
+    image: recipe-ingest:local
+    restart: unless-stopped
+    ports:
+      - "${RECIPE_INGEST_PORT:-8000}:8000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env or the environment}
+      TANDOOR_URL: ${TANDOOR_URL:?set TANDOOR_URL in .env or the environment}
+      TANDOOR_API_TOKEN: ${TANDOOR_API_TOKEN:?set TANDOOR_API_TOKEN in .env or the environment}
+      INGEST_API_KEY: ${INGEST_API_KEY:?set INGEST_API_KEY in .env or the environment}
+      YTDLP_COOKIE_FILE: ${YTDLP_COOKIE_FILE:-}
+      YTDLP_FFMPEG_LOCATION: ${YTDLP_FFMPEG_LOCATION:-}
+    # Optional cookies: uncomment the volume, then set YTDLP_COOKIE_FILE above to
+    # /cookies/cookies.txt (or add that key to the environment block).
+    # volumes:
+    #   - ./cookies.txt:/cookies/cookies.txt:ro
+    # Uncomment to join an existing network (e.g. the stack where Tandoor runs):
+    # networks:
+    #   - media
+
+# networks:
+#   media:
+#     external: true
+#     name: media_default  # docker network ls — use your stack’s network name

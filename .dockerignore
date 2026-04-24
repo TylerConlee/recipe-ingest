@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Secrets and local overrides (never bake into an image)
+.env
+.env.*
+cookies.txt
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+*.egg-info
+.eggs
+dist
+build
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# IDE / OS
+.DS_Store
+.idea
+.vscode
+.cursor
+
+# Compose / docs / CI (not needed inside the app image)
+docker-compose*.yml
+.dockerignore
+README.md
+*.md
+tests
+.github
+coverage.xml
+
+# Logs / temp
+*.log
+tmp
+temp
