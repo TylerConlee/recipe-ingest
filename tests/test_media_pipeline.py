@@ -18,15 +18,27 @@ from app.media_pipeline import (
 from app.settings import Settings
 
 
+def _stub_ffmpeg_bin_dir(parent: Path) -> Path:
+    """GitHub Actions runners often have no ffmpeg in PATH; tests use tiny shims."""
+    d = parent / "stub-ffmpeg-bin"
+    d.mkdir(parents=True, exist_ok=True)
+    for name in ("ffmpeg", "ffprobe"):
+        p = d / name
+        p.write_text("#!/bin/sh\nexit 0\n")
+        os.chmod(p, 0o755)
+    return d
+
+
 @pytest.fixture
-def settings_no_cookie() -> Settings:
+def settings_no_cookie(tmp_path) -> Settings:
+    stub = _stub_ffmpeg_bin_dir(tmp_path)
     return Settings(
         openai_api_key="x",
         tandoor_url="http://t",
         tandoor_api_token="x",
         ingest_api_key="x",
         ytdlp_cookie_file=None,
-        ytdlp_ffmpeg_location=None,
+        ytdlp_ffmpeg_location=str(stub),
     )
 
 
@@ -143,6 +155,7 @@ def test_download_best_media_missing_file_raises(settings_no_cookie, tmp_path, m
 
 
 def test_extract_audio_with_ffmpeg_mock_run(tmp_path):
+    bin_dir = _stub_ffmpeg_bin_dir(tmp_path)
     media = tmp_path / "in.mp4"
     media.write_bytes(b"x")
 
@@ -151,12 +164,13 @@ def test_extract_audio_with_ffmpeg_mock_run(tmp_path):
         Path(out_path).write_bytes(b"\x00" * 500)
         return SimpleNamespace(returncode=0, stderr="")
 
-    out = extract_audio_with_ffmpeg(str(media), 48, str(tmp_path), run=fake_run)
+    out = extract_audio_with_ffmpeg(str(media), 48, str(bin_dir), run=fake_run)
     assert Path(out).exists()
     assert Path(out).suffix == ".mp3"
 
 
 def test_extract_audio_ffmpeg_failure(tmp_path):
+    bin_dir = _stub_ffmpeg_bin_dir(tmp_path)
     media = tmp_path / "in.mp4"
     media.write_bytes(b"x")
 
@@ -164,7 +178,7 @@ def test_extract_audio_ffmpeg_failure(tmp_path):
         return SimpleNamespace(returncode=1, stderr="ffmpeg failed")
 
     with pytest.raises(RuntimeError, match="ffmpeg audio extract failed"):
-        extract_audio_with_ffmpeg(str(media), 48, str(tmp_path), run=bad_run)
+        extract_audio_with_ffmpeg(str(media), 48, str(bin_dir), run=bad_run)
 
 
 def test_fetch_social_media_remove_oserror_is_ignored(settings_no_cookie, tmp_path, monkeypatch):
