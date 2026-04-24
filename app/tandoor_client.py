@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
@@ -38,6 +39,25 @@ def tandoor_json_headers(settings: "Settings") -> dict:
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+
+
+def tandoor_request_url(settings: "Settings", path: str) -> str:
+    """
+    Build absolute URL for a Tandoor API path (path must start with ``/``).
+
+    When ``settings.tandoor_oauth_token_via_query`` is true, append ``access_token`` to the
+    query string (RFC 6750) so auth still works if a reverse proxy strips ``Authorization``.
+    """
+    base = settings.tandoor_url.rstrip("/")
+    url = f"{base}{path if path.startswith('/') else '/' + path}"
+    if not settings.tandoor_oauth_token_via_query:
+        return url
+    token = (settings.tandoor_api_token or "").strip()
+    parts = urlparse(url)
+    q = list(parse_qsl(parts.query, keep_blank_values=True))
+    q = [(k, v) for k, v in q if k != "access_token"]
+    q.append(("access_token", token))
+    return urlunparse(parts._replace(query=urlencode(q)))
 
 
 def download_cover_bytes(
@@ -78,7 +98,7 @@ def send_recipe_to_tandoor(
     def do(http: httpx.Client) -> dict:
         print("=== TANDOOR CREATE RECIPE ===")
         create_res = http.post(
-            f"{settings.tandoor_url}/api/recipe/",
+            tandoor_request_url(settings, "/api/recipe/"),
             json=body,
             auth=tandoor_auth,
         )
@@ -95,7 +115,7 @@ def send_recipe_to_tandoor(
                 try:
                     print("=== TANDOOR RECIPE IMAGE (multipart) ===", filename, len(file_bytes), "bytes")
                     img_res = http.put(
-                        f"{settings.tandoor_url}/api/recipe/{recipe_id}/image/",
+                        tandoor_request_url(settings, f"/api/recipe/{recipe_id}/image/"),
                         auth=tandoor_auth,
                         files={"image": (filename, BytesIO(file_bytes), mime)},
                     )

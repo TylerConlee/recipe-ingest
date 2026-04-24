@@ -74,6 +74,7 @@ Legacy alias: **`POST /ingest/tiktok`** behaves the same as **`POST /ingest/soci
 | `INGEST_API_KEY` | Yes | Secret the client must send as `X-Api-Key`. |
 | `YTDLP_COOKIE_FILE` | No | Path inside the container to a Netscape-format cookies file (e.g. `/cookies/cookies.txt`). |
 | `YTDLP_FFMPEG_LOCATION` | No | Directory containing `ffmpeg` and `ffprobe` if not on `PATH` (the default image already has them on `PATH`). |
+| `TANDOOR_OAUTH_TOKEN_VIA_QUERY` | No | If set to `1`, `true`, or `yes`, send the token as an `access_token` query parameter on Tandoor API URLs (RFC 6750) in addition to `Authorization: Bearer`. Use only when a proxy strips the `Authorization` header (tokens may appear in upstream access logs). |
 
 The application **fails fast at import time** if any required variable is missing.
 
@@ -86,6 +87,9 @@ That response means Django REST never saw valid credentials. Common causes:
 1. **`TANDOOR_API_TOKEN` is empty in the ingest container** — Confirm with `docker compose exec recipe-ingest env | grep TANDOOR` (or your stack’s equivalent). Compose will not substitute missing variables into the container if they are not set in `.env` or the host environment.
 2. **Reverse proxy strips `Authorization`** — nginx must forward it, for example: `proxy_set_header Authorization $http_authorization;` (and similarly in Traefik / Caddy if you terminate TLS in front of Tandoor). If the header never reaches Django, you get this error even with a correct token.
 3. **Redirects** — Ingest uses httpx `auth=` so the bearer token is re-sent after redirects; ensure `TANDOOR_URL` is the canonical HTTPS URL your proxy expects (trailing slash is fine).
+4. **Proxy still drops `Authorization`** — Set `TANDOOR_OAUTH_TOKEN_VIA_QUERY=1` so django-oauth-toolkit can read the token from the URL query string (same mechanism browsers use for some APIs). From a shell that can reach Tandoor, confirm with  
+   `curl -sS -o /dev/null -w '%{http_code}\n' -H 'Authorization: Bearer YOUR_TOKEN' 'https://your-tandoor/api/recipe/'`  
+   If that prints `200` or `405` but ingest still gets `403`, compare with the ingest container’s network path (same URL as `TANDOOR_URL`).
 
 ## API
 

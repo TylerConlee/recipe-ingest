@@ -10,6 +10,12 @@ def test_normalize_tandoor_api_token_strips_bearer_prefix():
     assert normalize_tandoor_api_token("  bearer  xyz  ") == "xyz"
 
 
+def test_normalize_tandoor_api_token_strips_bom_quotes_and_newlines():
+    assert normalize_tandoor_api_token("\ufefftda_abc") == "tda_abc"
+    assert normalize_tandoor_api_token('"tda_xyz"') == "tda_xyz"
+    assert normalize_tandoor_api_token("tda_one\r\n") == "tda_one"
+
+
 def test_from_env_normalizes_tandoor_token(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "a")
     monkeypatch.setenv("TANDOOR_URL", "http://x")
@@ -33,6 +39,19 @@ def test_from_env_success(monkeypatch):
     assert s.ingest_api_key == "c"
     assert s.ytdlp_cookie_file == "/c.txt"
     assert s.ytdlp_ffmpeg_location == "/opt/ffmpeg"
+    assert s.tandoor_oauth_token_via_query is False
+
+
+def test_from_env_tandoor_oauth_token_via_query(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "a")
+    monkeypatch.setenv("TANDOOR_URL", "http://x")
+    monkeypatch.setenv("TANDOOR_API_TOKEN", "b")
+    monkeypatch.setenv("INGEST_API_KEY", "c")
+    monkeypatch.delenv("TANDOOR_OAUTH_TOKEN_VIA_QUERY", raising=False)
+    assert Settings.from_env().tandoor_oauth_token_via_query is False
+
+    monkeypatch.setenv("TANDOOR_OAUTH_TOKEN_VIA_QUERY", "1")
+    assert Settings.from_env().tandoor_oauth_token_via_query is True
 
 
 @pytest.mark.parametrize(

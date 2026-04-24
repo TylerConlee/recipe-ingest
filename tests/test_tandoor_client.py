@@ -6,7 +6,12 @@ import httpx
 import pytest
 
 from app.settings import Settings
-from app.tandoor_client import download_cover_bytes, send_recipe_to_tandoor, tandoor_json_headers
+from app.tandoor_client import (
+    download_cover_bytes,
+    send_recipe_to_tandoor,
+    tandoor_json_headers,
+    tandoor_request_url,
+)
 
 
 @pytest.fixture
@@ -23,6 +28,52 @@ def test_tandoor_json_headers(tandoor_settings):
     h = tandoor_json_headers(tandoor_settings)
     assert h["Content-Type"] == "application/json"
     assert h["Authorization"] == "Bearer secret-token"
+
+
+def test_tandoor_request_url_without_query_flag(tandoor_settings):
+    assert tandoor_request_url(tandoor_settings, "/api/recipe/") == "http://tandoor.test/api/recipe/"
+
+
+def test_tandoor_request_url_with_query_flag():
+    s = Settings(
+        openai_api_key="x",
+        tandoor_url="https://host",
+        tandoor_api_token="tda_abc",
+        ingest_api_key="i",
+        tandoor_oauth_token_via_query=True,
+    )
+    u = tandoor_request_url(s, "/api/recipe/")
+    assert u.startswith("https://host/api/recipe/?")
+    assert "access_token=tda_abc" in u
+
+
+def test_send_recipe_appends_access_token_when_query_flag_enabled():
+    s = Settings(
+        openai_api_key="x",
+        tandoor_url="http://tandoor.test",
+        tandoor_api_token="tda_secret",
+        ingest_api_key="i",
+        tandoor_oauth_token_via_query=True,
+    )
+    recipe = {"title": "R", "steps": [{"instruction": "Do", "ingredients": []}]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/api/recipe/":
+            assert request.url.query.decode() == "access_token=tda_secret"
+            assert request.headers.get("authorization") == "Bearer tda_secret"
+            return httpx.Response(201, json={"id": 1, "name": "R", "source_url": ""})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, base_url="http://tandoor.test") as client:
+        send_recipe_to_tandoor(
+            s,
+            recipe,
+            image_url=None,
+            page_url="https://src",
+            platform="instagram",
+            http_client=client,
+        )
 
 
 def test_send_recipe_create_only_no_image(tandoor_settings):

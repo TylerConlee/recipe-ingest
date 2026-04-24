@@ -6,11 +6,20 @@ from typing import Optional
 
 
 def normalize_tandoor_api_token(raw: str) -> str:
-    """Strip whitespace and accidental duplicate ``Bearer `` prefix from env/copied values."""
+    """Strip whitespace, line endings, BOM, quotes, and accidental duplicate ``Bearer `` prefix."""
     t = (raw or "").strip()
+    t = t.replace("\ufeff", "").strip()
+    t = t.strip("\r\n")
+    if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+        t = t[1:-1].strip()
     if t.lower().startswith("bearer "):
         t = t[7:].strip()
     return t
+
+
+def _env_truthy(name: str) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
 
 
 @dataclass(frozen=True)
@@ -21,6 +30,7 @@ class Settings:
     ingest_api_key: str
     ytdlp_cookie_file: Optional[str] = None
     ytdlp_ffmpeg_location: Optional[str] = None
+    tandoor_oauth_token_via_query: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -30,6 +40,7 @@ class Settings:
         ingest_api_key = (os.environ.get("INGEST_API_KEY") or "").strip()
         cookie = os.environ.get("YTDLP_COOKIE_FILE")
         ffmpeg_loc = os.environ.get("YTDLP_FFMPEG_LOCATION")
+        token_query = _env_truthy("TANDOOR_OAUTH_TOKEN_VIA_QUERY")
         if not all([openai_api_key, tandoor_url, tandoor_api_token, ingest_api_key]):
             raise RuntimeError("Missing required env vars")
         return cls(
@@ -39,4 +50,5 @@ class Settings:
             ingest_api_key=ingest_api_key,
             ytdlp_cookie_file=(cookie or None),
             ytdlp_ffmpeg_location=(ffmpeg_loc or None),
+            tandoor_oauth_token_via_query=token_query,
         )
