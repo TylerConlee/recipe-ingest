@@ -28,6 +28,9 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
+      - name: Install ffmpeg (real-media tests)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -35,10 +38,10 @@ jobs:
 
       - name: Run tests with coverage
         env:
-          OPENAI_API_KEY: ci-placeholder
+          ANTHROPIC_API_KEY: ci-placeholder
           TANDOOR_URL: http://localhost
           TANDOOR_API_TOKEN: ci-placeholder
-          INGEST_API_KEY: ci-placeholder
+          INGEST_API_KEY: ci-placeholder-0123456789
         run: |
           python -m pytest tests/ \
             --cov=app \

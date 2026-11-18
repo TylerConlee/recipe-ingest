@@ -91,7 +91,10 @@ def send_recipe_to_tandoor(
     platform: str,
     http_client: Optional[httpx.Client] = None,
     client_factory: Callable[..., httpx.Client] = httpx.Client,
+    image: Optional[Tuple[Optional[bytes], str, str]] = None,
 ) -> dict:
+    """Create the recipe, then attach a cover. ``image`` lets the caller pass bytes it already
+    downloaded in parallel with the AI work; otherwise ``image_url`` is fetched here."""
     body = build_tandoor_recipe_payload(recipe, page_url, platform)
     tandoor_auth = TandoorBearerAuth(settings.tandoor_api_token)
 
@@ -109,8 +112,11 @@ def send_recipe_to_tandoor(
         recipe_id = created.get("id")
         print("Created recipe id:", recipe_id, "name:", created.get("name"))
 
-        if image_url and recipe_id:
-            file_bytes, filename, mime = download_cover_bytes(image_url, client_factory=client_factory)
+        if recipe_id and (image is not None or image_url):
+            if image is not None:
+                file_bytes, filename, mime = image
+            else:
+                file_bytes, filename, mime = download_cover_bytes(image_url, client_factory=client_factory)
             if file_bytes:
                 try:
                     print("=== TANDOOR RECIPE IMAGE (multipart) ===", filename, len(file_bytes), "bytes")
