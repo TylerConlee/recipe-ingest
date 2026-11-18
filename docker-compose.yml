@@ -17,16 +17,23 @@ services:
     ports:
       - "${RECIPE_INGEST_PORT:-8000}:8000"
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in .env or the environment}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env or the environment}
       TANDOOR_URL: ${TANDOOR_URL:?set TANDOOR_URL in .env or the environment}
       TANDOOR_API_TOKEN: ${TANDOOR_API_TOKEN:?set TANDOOR_API_TOKEN in .env or the environment}
       INGEST_API_KEY: ${INGEST_API_KEY:?set INGEST_API_KEY in .env or the environment}
       YTDLP_COOKIE_FILE: ${YTDLP_COOKIE_FILE:-}
       YTDLP_FFMPEG_LOCATION: ${YTDLP_FFMPEG_LOCATION:-}
+      CLAUDE_EXTRACT_MODEL: ${CLAUDE_EXTRACT_MODEL:-claude-opus-5-5}
+      CLAUDE_EXTRACT_EFFORT: ${CLAUDE_EXTRACT_EFFORT:-high}
+      TRANSCRIBER: ${TRANSCRIBER:-local}
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3-turbo}
+      WHISPER_THREADS: ${WHISPER_THREADS:-4}
+      NOTIFY_URL: ${NOTIFY_URL:-}
+    volumes:
+      - whisper-models:/models
     # Optional cookies: uncomment the volume, then set YTDLP_COOKIE_FILE above to
     # /cookies/cookies.txt (or add that key to the environment block).
-    # volumes:
-    #   - ./cookies.txt:/cookies/cookies.txt:ro
+    #   - ./cookies.txt:/cookies/cookies.txt:ro   # add under volumes: above
     # Uncomment to join an existing network (e.g. the stack where Tandoor runs):
     # networks:
     #   - media
@@ -35,3 +42,6 @@ services:
 #   media:
 #     external: true
 #     name: media_default  # docker network ls — use your stack’s network name
+
+volumes:
+  whisper-models:

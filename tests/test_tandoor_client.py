@@ -17,7 +17,7 @@ from app.tandoor_client import (
 @pytest.fixture
 def tandoor_settings() -> Settings:
     return Settings(
-        openai_api_key="x",
+        anthropic_api_key="sk-ant-test",
         tandoor_url="http://tandoor.test",
         tandoor_api_token="secret-token",
         ingest_api_key="i",
@@ -36,7 +36,7 @@ def test_tandoor_request_url_without_query_flag(tandoor_settings):
 
 def test_tandoor_request_url_with_query_flag():
     s = Settings(
-        openai_api_key="x",
+        anthropic_api_key="sk-ant-test",
         tandoor_url="https://host",
         tandoor_api_token="tda_abc",
         ingest_api_key="i",
@@ -49,7 +49,7 @@ def test_tandoor_request_url_with_query_flag():
 
 def test_send_recipe_appends_access_token_when_query_flag_enabled():
     s = Settings(
-        openai_api_key="x",
+        anthropic_api_key="sk-ant-test",
         tandoor_url="http://tandoor.test",
         tandoor_api_token="tda_secret",
         ingest_api_key="i",

@@ -10,10 +10,8 @@ from app.recipe_payload import (
     build_tandoor_steps,
     detect_platform,
     format_ingredient_line,
-    gpt_recipe_system_and_user_prompts,
     normalize_gpt_steps,
     parse_amount_to_float,
-    parse_gpt_recipe_json,
     parse_servings,
     pick_thumbnail_url,
     tandoor_ingredient_payload,
@@ -258,18 +256,34 @@ def test_build_tandoor_recipe_payload_source_fallback():
     assert payload["source_url"] == "https://fallback"
 
 
-def test_gpt_prompts_contain_url():
-    p, u = gpt_recipe_system_and_user_prompts("cap", "tr", "https://u", "manual")
-    assert "https://u" in u
-    assert "manual" in u
-    assert "Tandoor" in p
+def test_detect_platform_youtube():
+    assert detect_platform("https://youtube.com/shorts/abc") == "youtube"
 
 
-def test_parse_gpt_recipe_json():
-    d = parse_gpt_recipe_json('{"title": "X"}')
-    assert d["title"] == "X"
+def test_visual_estimate_marked_in_note():
+    row = tandoor_ingredient_payload(
+        {"amount": "1", "unit": "cup", "item": "rice", "note": "rinsed", "source": "visual_estimate"}, 0)
+    assert row["note"] == "rinsed; amount estimated from video"
+    row = tandoor_ingredient_payload({"amount": "1", "unit": "cup", "item": "rice", "source": "visual_estimate"}, 0)
+    assert row["note"] == "amount estimated from video"
+    row = tandoor_ingredient_payload(
+        {"item": "salt", "no_amount": True, "source": "visual_estimate"}, 0)
+    assert row["note"] == ""
 
 
-def test_parse_gpt_recipe_json_invalid():
-    with pytest.raises(json.JSONDecodeError):
-        parse_gpt_recipe_json("not json")
+def test_notes_step_appended_with_tips_equipment_uncertainties():
+    steps = build_tandoor_steps({
+        "steps": [{"instruction": "Cook", "ingredients": []}],
+        "equipment": ["wok", " "],
+        "tips": ["Use day-old rice"],
+        "uncertainties": ["oil amount not stated"],
+    })
+    assert steps[-1]["name"] == "Notes"
+    body = steps[-1]["instruction"]
+    assert "**Equipment:** wok" in body and "- Use day-old rice" in body and "- oil amount not stated" in body
+    assert steps[-1]["order"] == 1
+
+
+def test_no_notes_step_when_empty():
+    steps = build_tandoor_steps({"steps": [{"instruction": "Cook", "ingredients": []}], "tips": [], "equipment": []})
+    assert [s["name"] for s in steps] == [""]
