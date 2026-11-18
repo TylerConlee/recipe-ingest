@@ -2,6 +2,9 @@ fastapi
 uvicorn[standard]
 httpx
 yt-dlp
+anthropic>=2.0
+faster-whisper>=1.1
 openai
-pydantic
-
+pillow
+numpy
+pydantic>=2
