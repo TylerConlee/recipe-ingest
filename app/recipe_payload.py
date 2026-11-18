@@ -1,8 +1,7 @@
-"""Pure helpers: parse GPT recipe JSON and build Tandoor API payloads (no I/O)."""
+"""Pure helpers: turn the extracted recipe dict into Tandoor API payloads (no I/O)."""
 
 from __future__ import annotations
 
-import json
 from fractions import Fraction
 from typing import Any, List, Optional, Tuple
 
@@ -21,6 +20,8 @@ def detect_platform(url: str) -> str:
         return "tiktok"
     if "instagram.com" in u:
         return "instagram"
+    if "youtube.com/shorts" in u or "youtu.be" in u:
+        return "youtube"
     return "unknown"
 
 
@@ -264,7 +265,10 @@ def tandoor_ingredient_payload(ing: dict, order: int) -> Optional[dict]:
     else:
         raw_unit_display = str(u_raw or "").strip()
     unit = _tandoor_unit_name(ing.get("unit"))
-    note = (ing.get("note") or "").strip()[:ING_NOTE_MAX]
+    note = (ing.get("note") or "").strip()
+    if ing.get("source") == "visual_estimate" and not ing.get("no_amount"):
+        note = f"{note}; amount estimated from video" if note else "amount estimated from video"
+    note = note[:ING_NOTE_MAX]
     no_amount = bool(ing.get("no_amount"))
     amount_f = 0.0 if no_amount else parse_amount_to_float(ing.get("amount"))
     if not no_amount and amount_f <= 0 and not raw_unit_display:
@@ -287,8 +291,27 @@ def tandoor_ingredient_payload(ing: dict, order: int) -> Optional[dict]:
     }
 
 
+def notes_step_text(recipe: dict) -> str:
+    """Equipment, creator tips and import caveats rendered as a final markdown step."""
+    sections = []
+    equipment = [e for e in (recipe.get("equipment") or []) if isinstance(e, str) and e.strip()]
+    tips = [t for t in (recipe.get("tips") or []) if isinstance(t, str) and t.strip()]
+    unsure = [u for u in (recipe.get("uncertainties") or []) if isinstance(u, str) and u.strip()]
+    if equipment:
+        sections.append("**Equipment:** " + ", ".join(e.strip() for e in equipment))
+    if tips:
+        sections.append("**Tips**\n" + "\n".join(f"- {t.strip()}" for t in tips))
+    if unsure:
+        sections.append("**Import notes** (double-check against the video)\n"
+                        + "\n".join(f"- {u.strip()}" for u in unsure))
+    return "\n\n".join(sections)
+
+
 def build_tandoor_steps(recipe: dict) -> List[dict]:
     normalized = normalize_gpt_steps(recipe)
+    notes = notes_step_text(recipe)
+    if notes:
+        normalized.append({"name": "Notes", "instruction": notes, "time_minutes": None, "ingredients": []})
     steps_out: List[dict] = []
     for idx, st in enumerate(normalized):
         name = (st.get("name") or "").strip()[:STEP_NAME_MAX]
@@ -351,84 +374,3 @@ def build_tandoor_recipe_payload(recipe: dict, page_url: str, platform: str) -> 
         "keywords": keywords,
         "steps": steps,
     }
-
-
-def gpt_recipe_system_and_user_prompts(
-    caption: str, transcript: str, url: str, manual_title: Optional[str]
-) -> Tuple[str, str]:
-    """Build the fixed extraction prompts (used by OpenAI and unit-tested for stability)."""
-    prompt = """
-You are a recipe extraction engine for Tandoor Recipes (structured steps, each step may list its own ingredients).
-
-Given:
-- The social media CAPTION for a cooking video
-- The video TRANSCRIPT
-- The SOURCE URL
-
-Extract one complete recipe. Prefer accurate amounts from the transcript when the caption is vague.
-
-Respond ONLY with JSON using this schema:
-
-{
-  "title": "string",
-  "description": "string (plain text, under 500 characters if possible)",
-  "servings": "number or null (integer servings)",
-  "servings_text": "string or null (e.g. portions, slices, cookies — max ~30 chars)",
-  "prep_time_minutes": "integer or null (active prep/mise en place)",
-  "cook_time_minutes": "integer or null (stovetop/oven active cooking)",
-  "passive_time_minutes": "integer or null (chill, marinate, rest, unattended bake)",
-  "cuisine": "string or null (short, e.g. Italian)",
-  "keywords": ["optional extra tags, short phrases, max 8"],
-  "steps": [
-    {
-      "name": "short step title (optional, can be empty string)",
-      "instruction": "clear instruction text for this step",
-      "time_minutes": "integer minutes for this step or null",
-      "ingredients": [
-        {
-          "amount": "number or string like 1, 0.5, 1/2, 1 1/4",
-          "unit": "string (cup, tbsp, tsp, g, kg, ml, l, oz, lb, pinch, clove, …) or empty string if none",
-          "item": "food name (ingredient)",
-          "note": "string or null (prep notes: diced, melted, …)",
-          "is_section_header": "boolean, true only for a non-quantified section divider (e.g. For the sauce)",
-          "no_amount": "boolean, true for items like salt to taste when amount is not meaningful"
-        }
-      ]
-    }
-  ],
-  "source_url": "string (the video URL)"
-}
-
-Rules:
-- Put ingredients on the step where they are first used when possible. You MAY use a first step named
-  "Ingredients" with instruction "Gather and measure." listing all ingredients, then later steps with empty
-  "ingredients" arrays if that fits the video better.
-- Every non-header ingredient MUST have a meaningful "item" (food name).
-- Use "is_section_header": true only for section titles; for those set "item" to the section title text,
-  "amount" to 0 or empty, "no_amount": true, "unit": "" (empty is OK; the importer maps it to a generic unit).
-- For non-header ingredients, always set "unit" when there is a real measure (cup, g, …). If there is no unit
-  (e.g. "2 eggs"), use "" or "each".
-- Include all distinct cooking steps in order; do not merge unrelated actions.
-- If time is unknown, use nulls — do not invent precise minutes.
-- "source_url" must be the provided SOURCE URL below.
-""".strip()
-
-    user_content = f"""
-SOURCE URL:
-{url}
-
-DEFAULT / MANUAL TITLE (prefer for recipe title if caption title is junk):
-{manual_title or ''}
-
-CAPTION:
-{caption}
-
-TRANSCRIPT:
-{transcript}
-"""
-    return prompt, user_content
-
-
-def parse_gpt_recipe_json(raw: str) -> dict:
-    """Parse model output; separated for tests."""
-    return json.loads(raw)

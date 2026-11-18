@@ -1,153 +1,155 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+from app import main
+from app.main import JobStore, create_app, notify
+from app.pipeline import IngestResult, NotARecipe
 from app.settings import Settings
+
+KEY = "correct-key-0123456789"
 
 
 @pytest.fixture
-def api_settings() -> Settings:
-    return Settings(
-        openai_api_key="sk",
-        tandoor_url="http://t",
-        tandoor_api_token="t",
-        ingest_api_key="correct-key",
-    )
+def settings() -> Settings:
+    return Settings(anthropic_api_key="sk-ant", tandoor_url="http://t", tandoor_api_token="t",
+                    ingest_api_key=KEY, notify_url="https://ntfy.test/topic")
 
 
-def test_ingest_social_401_wrong_key(api_settings):
-    app = create_app(api_settings)
-    client = TestClient(app)
-    r = client.post(
-        "/ingest/social",
-        json={"url": "https://www.tiktok.com/@chef/video/123"},
-        headers={"X-Api-Key": "wrong"},
-    )
-    assert r.status_code == 401
+@pytest.fixture
+def sent(monkeypatch):
+    msgs = []
+    monkeypatch.setattr(main.httpx, "post", lambda url, **kw: msgs.append((url, kw)))
+    return msgs
 
 
-def test_ingest_social_cleanup_ignores_oserror_on_remove(api_settings, tmp_path):
-    audio = tmp_path / "a.mp3"
-    audio.write_bytes(b"\x00" * 200)
-    app = create_app(api_settings)
-    with patch("app.main.fetch_social_metadata_and_audio") as fsm, patch(
-        "app.main.transcribe_audio", return_value=""
-    ), patch(
-        "app.main.extract_recipe_with_gpt",
-        return_value={"title": "T", "steps": [{"instruction": "x", "ingredients": []}]},
-    ), patch(
-        "app.main.send_recipe_to_tandoor",
-        return_value={"id": 1, "name": "T", "source_url": ""},
-    ), patch("app.main.os.remove", side_effect=OSError("already gone")):
-        fsm.return_value = {
-            "caption": "",
-            "title": "",
-            "audio_path": str(audio),
-            "thumbnail_url": None,
-            "page_url": "https://www.tiktok.com/x",
-            "platform": "tiktok",
-        }
-        client = TestClient(app)
-        r = client.post(
-            "/ingest/social",
-            json={"url": "https://www.tiktok.com/@chef/video/1"},
-            headers={"X-Api-Key": "correct-key"},
-        )
-    assert r.status_code == 200
+def _ok_ingest(calls=None):
+    def ingest(url, settings, client, manual_title=None):
+        if calls is not None:
+            calls.append((url, manual_title))
+        return IngestResult(platform="tiktok", tandoor_id=42, tandoor_name="Pasta", source_url=url,
+                            uncertainties=["check salt"])
+    return ingest
 
 
-def test_ingest_social_200(api_settings, tmp_path):
-    audio = tmp_path / "clip.mp3"
-    audio.write_bytes(b"\x00" * 200)
+def _client(settings, ingest):
+    return TestClient(create_app(settings, client=object(), ingest=ingest), raise_server_exceptions=False)
 
-    app = create_app(api_settings)
-    with patch("app.main.fetch_social_metadata_and_audio") as fsm, patch(
-        "app.main.transcribe_audio", return_value="transcript here"
-    ), patch(
-        "app.main.extract_recipe_with_gpt",
-        return_value={"title": "Pasta", "steps": [{"instruction": "Boil", "ingredients": []}]},
-    ), patch(
-        "app.main.send_recipe_to_tandoor",
-        return_value={"id": 42, "name": "Pasta", "source_url": "https://tiktok.com/x"},
-    ):
-        fsm.return_value = {
-            "caption": "yum",
-            "title": "TT",
-            "audio_path": str(audio),
-            "thumbnail_url": None,
-            "page_url": "https://www.tiktok.com/x",
-            "platform": "tiktok",
-        }
-        client = TestClient(app)
-        r = client.post(
-            "/ingest/social",
-            json={"url": "https://www.tiktok.com/@chef/video/123"},
-            headers={"X-Api-Key": "correct-key"},
-        )
 
+def test_401_wrong_or_missing_key(settings):
+    c = _client(settings, _ok_ingest())
+    assert c.post("/ingest/social", json={"url": "https://www.tiktok.com/x"}, headers={"X-Api-Key": "nope"}).status_code == 401
+    assert c.post("/ingest/social", json={"url": "https://www.tiktok.com/x"}).status_code == 401
+    assert c.get("/jobs/abc").status_code == 401
+
+
+def test_sync_ingest_200_and_notify(settings, sent):
+    calls = []
+    c = _client(settings, _ok_ingest(calls))
+    r = c.post("/ingest/social", json={"url": "https://www.tiktok.com/@c/video/1", "manual_title": "M"},
+               headers={"X-Api-Key": KEY})
     assert r.status_code == 200
     body = r.json()
-    assert body["status"] == "ok"
-    assert body["tandoor_id"] == 42
-    assert body["tandoor_name"] == "Pasta"
-    assert not audio.exists()
+    assert body["status"] == "ok" and body["tandoor_id"] == 42 and body["tandoor_name"] == "Pasta"
+    assert body["tandoor_link"] == "http://t/view/recipe/42"
+    assert calls == [("https://www.tiktok.com/@c/video/1", "M")]
+    assert sent[0][1]["headers"]["Title"] == "Recipe imported"
+    assert b"1 things to double-check" in sent[0][1]["content"]
 
 
-def test_ingest_tiktok_alias(api_settings, tmp_path):
-    audio = tmp_path / "a.mp3"
-    audio.write_bytes(b"\x00" * 50)
-    app = create_app(api_settings)
-    with patch("app.main.fetch_social_metadata_and_audio") as fsm, patch(
-        "app.main.transcribe_audio", return_value=""
-    ), patch(
-        "app.main.extract_recipe_with_gpt",
-        return_value={"title": "X", "steps": [{"instruction": "y", "ingredients": []}]},
-    ), patch(
-        "app.main.send_recipe_to_tandoor",
-        return_value={"id": 1, "name": "X", "source_url": None},
-    ):
-        fsm.return_value = {
-            "caption": "",
-            "title": "",
-            "audio_path": str(audio),
-            "thumbnail_url": None,
-            "page_url": "https://instagram.com/reel/1",
-            "platform": "instagram",
-        }
-        client = TestClient(app)
-        r = client.post(
-            "/ingest/tiktok",
-            json={"url": "https://www.instagram.com/reel/abc/"},
-            headers={"X-Api-Key": "correct-key"},
-        )
-    assert r.status_code == 200
-    assert r.json()["platform"] == "instagram"
+def test_duplicate_url_is_deduplicated(settings, sent):
+    calls = []
+    c = _client(settings, _ok_ingest(calls))
+    h = {"X-Api-Key": KEY}
+    c.post("/ingest/social", json={"url": "https://www.tiktok.com/x"}, headers=h)
+    r = c.post("/ingest/tiktok", json={"url": "https://www.tiktok.com/x"}, headers=h)
+    assert r.status_code == 200 and r.json()["deduplicated"] is True
+    assert len(calls) == 1
 
 
-def test_ingest_social_removes_audio_after_exception(api_settings, tmp_path):
-    audio = tmp_path / "fail.mp3"
-    audio.write_bytes(b"\x00" * 80)
-    app = create_app(api_settings)
-    with patch("app.main.fetch_social_metadata_and_audio") as fsm, patch(
-        "app.main.transcribe_audio", side_effect=RuntimeError("boom")
-    ):
-        fsm.return_value = {
-            "caption": "",
-            "title": "",
-            "audio_path": str(audio),
-            "thumbnail_url": None,
-            "page_url": "https://www.tiktok.com/x",
-            "platform": "tiktok",
-        }
-        client = TestClient(app, raise_server_exceptions=False)
-        r = client.post(
-            "/ingest/social",
-            json={"url": "https://www.tiktok.com/@u/video/9"},
-            headers={"X-Api-Key": "correct-key"},
-        )
-    assert r.status_code == 500
-    assert not audio.exists()
+def test_background_job_flow(settings, sent):
+    c = _client(settings, _ok_ingest())
+    h = {"X-Api-Key": KEY}
+    r = c.post("/ingest/social", json={"url": "https://www.tiktok.com/bg", "background": True}, headers=h)
+    assert r.status_code == 202
+    jid = r.json()["job_id"]
+    for _ in range(50):
+        job = c.get(f"/jobs/{jid}", headers=h).json()
+        if job["status"] == "done":
+            break
+        time.sleep(0.02)
+    assert job["status"] == "done" and job["result"]["tandoor_id"] == 42
+    assert c.get("/jobs/missing", headers=h).status_code == 404
+
+
+def test_inflight_duplicate_returns_202(settings):
+    c = _client(settings, _ok_ingest())
+    store: JobStore = c.app.state.jobs
+    job = store.create("https://www.tiktok.com/busy")
+    store.update(job["id"], status="running")
+    r = c.post("/ingest/social", json={"url": "https://www.tiktok.com/busy"}, headers={"X-Api-Key": KEY})
+    assert r.status_code == 202 and r.json()["job_id"] == job["id"]
+
+
+def test_not_a_recipe_422(settings, sent):
+    def ingest(*a, **k):
+        raise NotARecipe("No recipe found in this video.")
+    c = _client(settings, ingest)
+    r = c.post("/ingest/social", json={"url": "https://www.tiktok.com/dance"}, headers={"X-Api-Key": KEY})
+    assert r.status_code == 422
+    assert sent[0][1]["headers"]["Title"] == "Recipe import skipped"
+
+
+def test_error_500_then_retry_allowed(settings, sent):
+    attempts = []
+
+    def ingest(url, *a, **k):
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise RuntimeError("yt-dlp blocked")
+        return _ok_ingest()(url, *a, **k)
+
+    c = _client(settings, ingest)
+    h = {"X-Api-Key": KEY}
+    assert c.post("/ingest/social", json={"url": "https://www.tiktok.com/e"}, headers=h).status_code == 500
+    assert sent[0][1]["headers"]["Title"] == "Recipe import failed"
+    assert c.post("/ingest/social", json={"url": "https://www.tiktok.com/e"}, headers=h).status_code == 200
+
+
+def test_background_error_recorded(settings, sent):
+    def ingest(*a, **k):
+        raise RuntimeError("boom")
+    c = _client(settings, ingest)
+    h = {"X-Api-Key": KEY}
+    jid = c.post("/ingest/social", json={"url": "https://www.tiktok.com/b", "background": True}, headers=h).json()["job_id"]
+    for _ in range(50):
+        job = c.get(f"/jobs/{jid}", headers=h).json()
+        if job["status"] == "error":
+            break
+        time.sleep(0.02)
+    assert job["status"] == "error" and "boom" in job["error"]
+
+
+def test_healthz(settings):
+    r = _client(settings, _ok_ingest()).get("/healthz")
+    assert r.json()["extract_model"] == "claude-opus-5-5"
+
+
+def test_job_prune(monkeypatch):
+    store = JobStore()
+    job = store.create("u")
+    monkeypatch.setattr(main.time, "time", lambda: job["created"] + main.JOB_TTL_S + 1)
+    store.create("v")
+    assert store.get(job["id"]) is None
+
+
+def test_notify_noop_and_failure(settings):
+    s_none = Settings(anthropic_api_key="a", tandoor_url="t", tandoor_api_token="t", ingest_api_key=KEY)
+    notify(s_none, "x", "y", post=lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not post")))
+
+    def boom(*a, **k):
+        raise OSError("offline")
+    notify(settings, "x", "y", post=boom)  # swallowed
