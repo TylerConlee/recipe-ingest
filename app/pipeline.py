@@ -75,7 +75,10 @@ def run_ingest(
     with tempfile.TemporaryDirectory(prefix="ingest-", dir=workdir_root) as workdir, \
             ThreadPoolExecutor(max_workers=4) as pool:
         # Comments run in their own killable process alongside the download.
-        comments_f = pool.submit(media.fetch_comments, url, settings) if settings.fetch_comments else None
+        want_comments = settings.fetch_comments and media.comments_supported(url)
+        if settings.fetch_comments and not want_comments:
+            print(f"Comments skipped: yt-dlp has no comment support for {platform}.")
+        comments_f = pool.submit(media.fetch_comments, url, settings) if want_comments else None
 
         with timer("download"):
             dl = media.download_media(url, settings, workdir)

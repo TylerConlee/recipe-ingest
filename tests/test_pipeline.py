@@ -56,9 +56,9 @@ def patched(monkeypatch, tmp_path):
 
 
 def test_run_ingest_happy_path(patched):
-    res = pipeline.run_ingest("https://www.tiktok.com/@chef/video/1", _s(), client=object())
+    res = pipeline.run_ingest("https://www.instagram.com/reel/abc/", _s(), client=object())
     out = res.as_response()
-    assert out["tandoor_id"] == 7 and out["platform"] == "tiktok"
+    assert out["tandoor_id"] == 7 and out["platform"] == "instagram"
     assert out["uncertainties"] == ["salt amount unclear"]
     assert out["stats"]["frames_sampled"] == 3 and out["stats"]["ingredients"] == 1
     assert {"download", "transcribe", "frames", "frame_ocr", "extract", "tandoor", "total"} <= set(out["timings"])
@@ -86,3 +86,11 @@ def test_run_ingest_not_a_recipe(patched):
     with pytest.raises(pipeline.NotARecipe):
         pipeline.run_ingest("https://t/x", _s(), client=object())
     assert "sent" not in patched
+
+
+def test_run_ingest_skips_comments_for_tiktok(patched, monkeypatch):
+    called = []
+    monkeypatch.setattr(pipeline.media, "fetch_comments", lambda url, s: called.append(url) or [])
+    out = pipeline.run_ingest("https://www.tiktok.com/t/ZPNNE93FR/", _s(), client=object()).as_response()
+    assert out["platform"] == "tiktok" and called == []
+    assert "<creator_comments>\n(none)" in patched["text"]
