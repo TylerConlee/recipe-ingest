@@ -65,7 +65,8 @@ def download_cover_bytes(
     client_factory: Callable[..., httpx.Client] = httpx.Client,
 ) -> Tuple[Optional[bytes], str, str]:
     try:
-        with client_factory(timeout=60.0, follow_redirects=True) as http:
+        with client_factory(timeout=60.0, follow_redirects=True,
+                            transport=httpx.HTTPTransport(retries=3)) as http:
             r = http.get(url, headers={"User-Agent": BROWSER_UA})
             r.raise_for_status()
             ctype = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
@@ -138,5 +139,6 @@ def send_recipe_to_tandoor(
 
     if http_client is not None:
         return do(http_client)
-    with client_factory(timeout=120.0) as http:
+    # Transport-level retries only re-send when the connection never opened, so no duplicate recipes.
+    with client_factory(timeout=120.0, transport=httpx.HTTPTransport(retries=3)) as http:
         return do(http)

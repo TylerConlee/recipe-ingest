@@ -244,6 +244,7 @@ def test_send_recipe_uses_context_manager_client(tandoor_settings):
     )
     assert out["id"] == 8
     mock_cls.assert_called_once()
+    assert isinstance(mock_cls.call_args.kwargs["transport"], httpx.HTTPTransport)
     inner.post.assert_called_once()
 
 

@@ -45,6 +45,66 @@ def test_yt_dlp_base_opts_with_cookie():
     assert o["cookiefile"] == "/cookies.txt"
     assert o["ffmpeg_location"] == "/ff"
     assert o["noplaylist"] is True
+    assert o["retries"] >= 3 and o["extractor_retries"] >= 1 and o["socket_timeout"] == 30
+
+
+# --- retries / platform support ------------------------------------------
+
+DNS_ERR = ("ERROR: [vm.tiktok] ZPNNE93FR: Unable to download webpage: [Errno -2] Name or service not known "
+           "(caused by TransportError('[Errno -2] Name or service not known'))")
+
+
+@pytest.mark.parametrize("msg,expected", [
+    (DNS_ERR, True),
+    ("Temporary failure in name resolution", True),
+    ("HTTP Error 503: Service Unavailable", True),
+    ("HTTP Error 429: Too Many Requests", True),
+    ("Read timed out", True),
+    ("HTTP Error 404: Not Found", False),
+    ("Unsupported URL: https://example.com", False),
+    ("This video is private", False),
+])
+def test_is_transient(msg, expected):
+    assert mp.is_transient(RuntimeError(msg)) is expected
+
+
+def test_with_retries_recovers_after_transient_failure():
+    calls, slept = [], []
+
+    def fn():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError(DNS_ERR)
+        return "ok"
+
+    assert mp.with_retries(fn, attempts=3, delays=(1, 2), sleep=slept.append) == "ok"
+    assert len(calls) == 3 and slept == [1, 2]
+
+
+def test_with_retries_gives_up_after_attempts():
+    slept = []
+    with pytest.raises(RuntimeError, match="Name or service"):
+        mp.with_retries(lambda: (_ for _ in ()).throw(RuntimeError(DNS_ERR)), attempts=2, delays=(5,),
+                        sleep=slept.append)
+    assert slept == [5]
+
+
+def test_with_retries_does_not_retry_permanent_errors():
+    calls = []
+
+    def fn():
+        calls.append(1)
+        raise RuntimeError("This video is private")
+
+    with pytest.raises(RuntimeError, match="private"):
+        mp.with_retries(fn, sleep=lambda s: pytest.fail("should not sleep"))
+    assert len(calls) == 1
+
+
+def test_comments_supported():
+    assert mp.comments_supported("https://www.tiktok.com/t/ZPNNE93FR/") is False
+    assert mp.comments_supported("https://www.instagram.com/reel/abc/") is True
+    assert mp.comments_supported("https://youtube.com/shorts/abc") is True
 
 
 def test_ensure_ffmpeg_custom_dir(tmp_path):
@@ -114,6 +174,20 @@ def test_download_media_finds_merged_extension(stub_settings, tmp_path):
     ydl = FakeYDL(INFO, write_ext="webm", actual_ext="mp4")
     dl = mp.download_media("u", stub_settings, str(tmp_path), ydl_factory=ydl)
     assert dl.media_path.endswith("123.mp4")
+
+
+def test_download_media_retries_dns_blip(stub_settings, tmp_path):
+    class Flaky(FakeYDL):
+        def extract_info(self, url, download):
+            if self.calls == 0:
+                self.calls += 1
+                raise RuntimeError(DNS_ERR)
+            return super().extract_info(url, download)
+
+    ydl, slept = Flaky(INFO), []
+    dl = mp.download_media("https://www.tiktok.com/t/x/", stub_settings, str(tmp_path), ydl_factory=ydl,
+                           sleep=slept.append)
+    assert dl.media_path.endswith("123.mp4") and ydl.calls == 2 and len(slept) == 1
 
 
 def test_download_media_missing_file_raises(stub_settings, tmp_path):
