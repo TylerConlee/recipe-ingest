@@ -24,6 +24,13 @@ YTDLP_FORMAT = "b[height<=720][vcodec!=none]/bv*[height<=720]+ba/b"
 # 50k comments can't stall the whole import.
 COMMENTS_TIMEOUT_S = 25
 MAX_TOP_COMMENTS = 15
+# yt-dlp's TikTok extractor has no comment support (checked against 2026.10.26), so asking
+# for TikTok comments only costs an extra request and always returns nothing.
+COMMENTLESS_PLATFORMS = {"tiktok"}
+
+# Transient network failures (DNS blips after a reboot, resets, 5xx/429) get retried.
+DOWNLOAD_ATTEMPTS = 3
+RETRY_DELAYS_S = (3, 10)
 
 # --- Frames ---------------------------------------------------------------
 FRAME_WIDTH = 540  # 540x960 for vertical video, ~700 image tokens per frame

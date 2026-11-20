@@ -8,20 +8,24 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
 
 from yt_dlp import YoutubeDL
 
 from app.constants import (
+    COMMENTLESS_PLATFORMS,
     COMMENTS_TIMEOUT_S,
+    DOWNLOAD_ATTEMPTS,
     FRAME_DEDUPE_HAMMING,
     FRAME_WIDTH,
     MAX_SAMPLED_FRAMES,
     MAX_TOP_COMMENTS,
+    RETRY_DELAYS_S,
     YTDLP_FORMAT,
 )
-from app.recipe_payload import pick_thumbnail_url
+from app.recipe_payload import detect_platform, pick_thumbnail_url
 
 if TYPE_CHECKING:
     from app.settings import Settings
@@ -63,8 +67,61 @@ def ensure_ffmpeg(ffmpeg_location: str | None) -> Tuple[str, str]:
     return ffmpeg, ffprobe
 
 
+TRANSIENT_MARKERS = (
+    "name or service not known",
+    "temporary failure in name resolution",
+    "nodename nor servname",
+    "timed out",
+    "connection reset",
+    "connection refused",
+    "connection aborted",
+    "remote end closed",
+    "network is unreachable",
+    "transporterror",
+    "http error 429",
+    "http error 500",
+    "http error 502",
+    "http error 503",
+    "http error 504",
+)
+
+
+def is_transient(err: BaseException) -> bool:
+    """True for network failures worth retrying (DNS, resets, timeouts, 429/5xx)."""
+    text = f"{type(err).__name__}: {err}".lower()
+    return any(m in text for m in TRANSIENT_MARKERS)
+
+
+def with_retries(fn: Callable, *, attempts: int = DOWNLOAD_ATTEMPTS, delays=RETRY_DELAYS_S,
+                 sleep: Callable[[float], None] = time.sleep, label: str = "download"):
+    """Call ``fn`` and retry transient failures with backoff; anything else raises at once."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt >= attempts or not is_transient(e):
+                raise
+            delay = delays[min(attempt - 1, len(delays) - 1)]
+            print(f"{label}: attempt {attempt}/{attempts} hit a transient error ({e}); retrying in {delay}s")
+            sleep(delay)
+
+
+def comments_supported(url: str) -> bool:
+    return detect_platform(url) not in COMMENTLESS_PLATFORMS
+
+
 def yt_dlp_base_opts(settings: "Settings") -> dict:
-    opts: dict = {"quiet": True, "no_warnings": True, "noplaylist": True}
+    opts: dict = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "noprogress": True,  # keep container logs readable
+        # yt-dlp's own retries cover dropped transfers; with_retries() covers failed extraction (e.g. DNS).
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_retries": 3,
+        "socket_timeout": 30,
+    }
     if settings.ytdlp_cookie_file:
         opts["cookiefile"] = settings.ytdlp_cookie_file
     if settings.ytdlp_ffmpeg_location:
@@ -77,17 +134,23 @@ def download_media(
     settings: "Settings",
     workdir: str,
     ydl_factory: Callable[[dict], YoutubeDL] = YoutubeDL,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> DownloadedMedia:
-    """One yt-dlp call: metadata + a <=720p file into ``workdir`` (previously two network round-trips)."""
+    """One yt-dlp call: metadata + a <=720p file into ``workdir`` (previously two network round-trips).
+    Transient network failures (e.g. a DNS blip) are retried with backoff."""
     opts = {
         **yt_dlp_base_opts(settings),
         "format": YTDLP_FORMAT,
         "merge_output_format": "mp4",
         "outtmpl": os.path.join(workdir, "%(id)s.%(ext)s"),
     }
-    with ydl_factory(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
+
+    def attempt():
+        with ydl_factory(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            return info, ydl.prepare_filename(info)
+
+    info, filename = with_retries(attempt, sleep=sleep, label="yt-dlp download")
 
     if not os.path.exists(filename):
         # Merged outputs can change extension (e.g. .webm -> .mp4).
